@@ -26,6 +26,7 @@ void free_image(Image *img);
 Images *get_imgs_data(DIR *dir);
 void free_images(Images *imgs);
 Dataset *load_dataset(const char* path, int max_images);
+void train_test_split(Dataset *dataset, float ratio, int *train_inds, int *test_inds);
 
 
 

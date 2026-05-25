@@ -126,11 +126,27 @@ Dataset *load_dataset(const char* path, int max_images){
             ds->classes[index] = class;
             free_image(img);
         }
-        printf("Loaded %d images in %d class\n", to_load, class);
+        printf("Loaded %d images in %s class\n", to_load, classes[class]);
  
         free_images(images);
         closedir(dir);
     }
     
     return ds;
+}
+// REWRITE ONLY SPLITING ALL IMAGES NOT IN EACH CLASS
+void train_test_split(Dataset *dataset, float ratio, int *train_inds, int *test_inds){
+    int num_of_train = dataset->num_of_images * ratio;
+    int num_of_test = dataset->num_of_images - num_of_train;
+    int global_index = 0;
+    printf("Number of train images: %d\n",num_of_train);
+    printf("Number of test images: %d\n",num_of_test);
+    for (int i = 0; i < num_of_train; i++){
+        train_inds[i] = i;
+        global_index++;
+    }
+
+    for (int i = 0; i < num_of_test; i++){
+        test_inds[i] = global_index++;
+    }
 }

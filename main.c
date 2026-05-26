@@ -17,15 +17,29 @@ int main() {
     free(test);
     // DEBUG 1 IMAGE
     Image *image = load_one_image("src/images/a.png");
-    float *out = malloc(576 * 25 * sizeof(float));
-    float **maps = malloc(6 * sizeof(float *));
-    maps = layer(image->data, 5, 1, 6);
-    for(int i = 0; i < 144; i++){
-        printf("%f ",maps[0][i]);
+
+    ConvLayer *cw1 = init_weights_conv(6, 25); 
+
+    float **maps1 = layer(image->data, 1, 28, 28, 5, 1, 6, cw1);
+    float *flat1 = flatten(maps1, 6, 12, 12);
+    
+    ConvLayer *cw2 = init_weights_conv(6, 25); 
+
+    float **maps2 = layer(flat1, 1, 28, 28, 5, 1, 6, cw2);
+    float *flat2 = flatten(maps2, 6, 12, 12);
+
+    FullLayer *fw = init_weights_full(256, 10);
+    float *logits = full_layer(fw, flat1, 256, 10);
+    printf("Probabilities: ");  
+    for(int i = 0; i < 10; i++){
+        printf("%f ", logits[i]);
     }
+
     printf("Channels: %d\n", image->channels);
     printf("Width: %d, Height: %d\n", image->width, image->height);
     free_image(image);
+
+
 
     return 0;
 }

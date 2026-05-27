@@ -12,12 +12,10 @@ ConvLayer *init_weights_conv(int num_of_filters, int block_size){
     weights->weights = malloc(num_of_filters * sizeof(float *));
     for(int i = 0; i < num_of_filters; i++){
         weights->weights[i] = malloc(block_size * sizeof(float));
-        for(int j = 0; j < block_size; j ++){
-            weights->weights[i][j] = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+        for(int j = 0; j < block_size; j++){
+            weights->weights[i][j] = ((float)rand() / RAND_MAX - 0.5f) * 0.0001f;
         }
     }
-
-    
 
     weights->bias = malloc(num_of_filters * sizeof(float));
     for (int f = 0; f < num_of_filters; f++) {
@@ -32,10 +30,8 @@ FullLayer *init_weights_full(int in_size, int out_size){
 
     weights->weights = malloc(in_size * out_size * sizeof(float));
     for (int i = 0; i < in_size * out_size; i++) {
-        weights->weights[i] = ((float)rand() / RAND_MAX - 0.5f) * 0.1f;
+        weights->weights[i] = ((float)rand() / RAND_MAX - 0.5f) * 0.0001f;
     }
-
-    
 
     weights->bias = malloc(out_size * sizeof(float));
     for (int i = 0; i < out_size; i++) {
@@ -65,7 +61,7 @@ void im2col(float *image, int num_of_ch, int image_width, int image_height, int 
     int conv_pos_rows = (image_height - conv_size) / step + 1;
     int final_rows = conv_pos_cols * conv_pos_rows;
     
-for (int ch = 0; ch < num_of_ch; ch++) {
+    for (int ch = 0; ch < num_of_ch; ch++) {
         float *channel_data = image + ch * image_width * image_height;
         
         for (int row = 0; row < conv_pos_rows; row++) {
@@ -88,23 +84,16 @@ for (int ch = 0; ch < num_of_ch; ch++) {
 }
 
 void mat_mult(float *a, float *b, int height_a, int width_a, int width_b, float *out) {
-    // a: height_a × width_a
-    // b: width_a × width_b
-    // out: height_a × width_b
-    
     for (int i = 0; i < height_a; i++) {
         for (int j = 0; j < width_b; j++) {
             float sum = 0;
             for (int k = 0; k < width_a; k++) {
                 sum += a[i * width_a + k] * b[k * width_b + j];
-
             }
-            
             out[i * width_b + j] = sum;
         }
     }
 }
-
 
 void relu(float *x, int size){
     for (int i = 0; i < size; i++){
@@ -122,10 +111,8 @@ float *maxpooling(float *map, int h, int w, int coef){
     
     for(int i = 0; i < new_h; i++){
         for(int j = 0; j < new_w; j++){
-            // FIRST ELEMENT
             float max = map[i * coef * w + j * coef];
             
-            // WINDOW COEF x COEF
             for(int ky = 0; ky < coef; ky++){
                 for(int kx = 0; kx < coef; kx++){
                     int y = i * coef + ky;
@@ -155,69 +142,124 @@ float *flatten(float **maps, int number_of_maps, int h, int w){
 }
 
 float **layer(float *input, int in_c, int in_h, int in_w, int kernel_size, int step, int num_of_filters, ConvLayer *weights){
-
-    srand(time(NULL));  
     float *col;
     int out_w = (in_w - kernel_size) / step + 1;
     int out_h = (in_h - kernel_size) / step + 1;
     int final_pix = out_w * out_h;
-
     int block_size = in_c * kernel_size * kernel_size;
 
-
     col = malloc(final_pix * block_size * sizeof(float));
-
     im2col(input, in_c, in_h, in_w, kernel_size, step, col);
-
-
-    
-
 
     float **maps = malloc(num_of_filters * sizeof(float *));
     for (int i = 0; i < num_of_filters; i++){
         float *feature_map = malloc(final_pix * sizeof(float));
-        // MATRIX MULT FILTERSxCOL
         mat_mult(weights->weights[i], col, 1, block_size, final_pix, feature_map);
 
         for (int j = 0; j < final_pix; j++){
             feature_map[j] += weights->bias[i];
         }
         relu(feature_map, final_pix);
-
+        for (int j = 0; j < final_pix; j++) {
+            if (feature_map[j] > 10) feature_map[j] = 10;
+        }
         float *pooled_feature_map = maxpooling(feature_map, out_h, out_w, 2); 
         maps[i] = pooled_feature_map;
         free(feature_map);
     }
 
     free(col);
- 
     return maps;
 }
 
 float *full_layer(FullLayer *weights, float *maps, int in_size, int classes){
     float *logits = malloc(classes * sizeof(float));
-
+    
     for (int i = 0; i < classes; i++){
         logits[i] = weights->bias[i];
         for (int j = 0; j < in_size; j++){
             logits[i] += weights->weights[j * classes + i] * maps[j];
         }
     }
+    
+    return logits;
+}
 
-    float max_val = logits[0];
-    for (int i = 1; i < classes; i++) {
-        if (logits[i] > max_val) max_val = logits[i];
+void softmax(float *input, float *output, int n){
+    float max_val = input[0];
+    for (int i = 1; i < n; i++) {
+        if (input[i] > max_val) max_val = input[i];
     }
     
     float sum = 0;
-    for (int i = 0; i < classes; i++){
-        logits[i] = expf(logits[i] - max_val);
-        sum += logits[i];
-    }
-    for (int i = 0; i < classes; i++){
-        logits[i] /= sum;
+    for (int i = 0; i < n; i++) {
+        output[i] = expf(input[i] - max_val);
+        sum += output[i];
     }
     
-    return logits;
-    
+    for (int i = 0; i < n; i++) {
+        output[i] /= sum;
+    }
+}
+
+float cross_entropy(float *probs, int true_label, int num_classes){
+    float eps = 1e-8;
+    float p = probs[true_label];
+    return -logf(p + eps);
+}
+
+void softmax_cross_entropy_gradient(float *probs, int true_class, float *grad_out){
+    for (int i = 0; i < 10; i++) {
+        grad_out[i] = probs[i];
+    }
+    grad_out[true_class] -= 1.0;
+}
+
+void fc_backward(float *grad_out, float *input, float *weights, float *grad_weights, float *grad_bias, float *grad_input, int in_size, int out_size){
+    for (int i = 0; i < out_size; i++){
+        grad_bias[i] = grad_out[i];
+    }
+
+    for (int i = 0; i < in_size; i++){
+        for (int j = 0; j < out_size; j++){
+            grad_weights[i * out_size + j] = input[i] * grad_out[j];
+        }
+    }
+
+    for (int i = 0; i < in_size; i++) {
+        float sum = 0;
+        for (int j = 0; j < out_size; j++){
+            sum += weights[i * out_size + j] * grad_out[j];
+        }
+        grad_input[i] = sum;
+    }
+}
+
+int argmax(float *array, int size){
+    int max_idx = 0;
+    for (int i = 1; i < size; i++){
+        if (array[i] > array[max_idx]){
+            max_idx = i;
+        }
+    }
+    return max_idx;
+}
+
+void sgd_update(float *weights, float *gradients, int size, float lr, float clip) {
+    for (int i = 0; i < size; i++) {
+        float grad = gradients[i];
+        
+        if (isnan(grad) || isinf(grad)) {
+            continue;
+        }
+        
+        if (grad > clip) grad = clip;
+        if (grad < -clip) grad = -clip;
+        
+        weights[i] -= lr * grad;
+        
+        if (isnan(weights[i]) || isinf(weights[i])) {
+            weights[i] = 0;
+        }
+    }
 }

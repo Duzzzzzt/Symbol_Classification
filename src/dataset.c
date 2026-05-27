@@ -123,7 +123,8 @@ Dataset *load_dataset(const char* path, int max_images){
             for (int pixel = 0; pixel < W * H; pixel++){
                 ds->images[index + pixel] = img->data[pixel];
             }
-            ds->classes[index] = class;
+            
+            ds->classes[index++] = class;
             free_image(img);
         }
         printf("Loaded %d images in %s class\n", to_load, classes[class]);
@@ -134,19 +135,60 @@ Dataset *load_dataset(const char* path, int max_images){
     
     return ds;
 }
-// REWRITE ONLY SPLITING ALL IMAGES NOT IN EACH CLASS
-void train_test_split(Dataset *dataset, float ratio, int *train_inds, int *test_inds){
+
+void train_test_split(Dataset *dataset, float ratio, Dataset *train, Dataset *test){
+    int *indices = malloc(dataset->num_of_images * sizeof(int));
+    for (int i = 0; i < dataset->num_of_images; i++) {
+        indices[i] = i;
+    }
+    for (int i = dataset->num_of_images - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        int temp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = temp;
+    }
     int num_of_train = dataset->num_of_images * ratio;
     int num_of_test = dataset->num_of_images - num_of_train;
     int global_index = 0;
     printf("Number of train images: %d\n",num_of_train);
     printf("Number of test images: %d\n",num_of_test);
-    for (int i = 0; i < num_of_train; i++){
-        train_inds[i] = i;
-        global_index++;
-    }
 
-    for (int i = 0; i < num_of_test; i++){
-        test_inds[i] = global_index++;
+    train->images = malloc(num_of_train * dataset->image_size * sizeof(float));
+    train->classes = malloc(num_of_train * sizeof(int));
+    train->num_of_images = num_of_train;
+    train->image_size = dataset->image_size;
+    
+
+    test->images = malloc(num_of_test * dataset->image_size * sizeof(float));
+    test->classes = malloc(num_of_test * sizeof(int));
+    test->num_of_images = num_of_test;
+    test->image_size = dataset->image_size;
+    
+
+    for (int i = 0; i < num_of_train; i++) {
+        int idx = indices[i];
+
+        memcpy(&train->images[i * dataset->image_size],
+               &dataset->images[idx * dataset->image_size],
+               dataset->image_size * sizeof(float));
+
+        train->classes[i] = dataset->classes[idx];
     }
+    
+
+    for (int i = 0; i < num_of_test; i++) {
+        int idx = indices[num_of_train + i];
+
+        memcpy(&test->images[i * dataset->image_size], &dataset->images[idx * dataset->image_size], dataset->image_size * sizeof(float));
+
+        test->classes[i] = dataset->classes[idx];
+    }
+    
+    free(indices);
+}
+
+void free_dataset(Dataset *ds){
+    free(ds->classes);
+    free(ds->images);
+    free(ds);
 }

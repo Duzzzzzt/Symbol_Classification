@@ -2,7 +2,7 @@
 
 stb_image.h
 
-
+.venv
 # Prerequisites
 *.d
 

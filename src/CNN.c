@@ -10,10 +10,11 @@ ConvLayer *init_weights_conv(int num_of_filters, int block_size){
     ConvLayer *weights = malloc(sizeof(ConvLayer));
 
     weights->weights = malloc(num_of_filters * sizeof(float *));
+    float scale = sqrtf(2.0f / block_size);
     for(int i = 0; i < num_of_filters; i++){
         weights->weights[i] = malloc(block_size * sizeof(float));
         for(int j = 0; j < block_size; j++){
-            weights->weights[i][j] = ((float)rand() / RAND_MAX - 0.5f) * 0.0001f;
+            weights->weights[i][j] = (((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
         }
     }
 
@@ -62,23 +63,27 @@ void im2col(float *image, int num_of_ch, int image_width, int image_height, int 
     int num_of_pix = conv_size * conv_size;
     int conv_pos_cols = (image_width - conv_size) / step + 1;
     int conv_pos_rows = (image_height - conv_size) / step + 1;
-    int final_rows = conv_pos_cols * conv_pos_rows;
+    int final_rows = num_of_ch * conv_size * conv_size;
     
-    for (int ch = 0; ch < num_of_ch; ch++) {
-        float *channel_data = image + ch * image_width * image_height;
+    
         
-        for (int row = 0; row < conv_pos_rows; row++) {
-            for (int col_idx = 0; col_idx < conv_pos_cols; col_idx++) {
-                int out_row = ch * final_rows + row * conv_pos_cols + col_idx;
-                
+        
+    for (int row = 0; row < conv_pos_rows; row++) {
+        for (int col_idx = 0; col_idx < conv_pos_cols; col_idx++) {
+            int out_row = row * conv_pos_cols + col_idx;
+            for (int ch = 0; ch < num_of_ch; ch++) {
                 for (int ky = 0; ky < conv_size; ky++) {
                     for (int kx = 0; kx < conv_size; kx++) {
+
                         int in_y = row * step + ky;
                         int in_x = col_idx * step + kx;
-                        int out_col = (ky * conv_size + kx) + ch * num_of_pix;
-                        int image_idx = in_y * image_width + in_x;
+
+                        int out_col = ch * conv_size * conv_size + ky * conv_size + kx;
+
+                        col[out_row * final_rows + out_col] = image[ch * image_height * image_width + in_y * image_width + in_x];
                         
-                        col[out_row * (num_of_ch * num_of_pix) + out_col] = channel_data[image_idx];
+                        
+                        
                     }
                 }
             }
@@ -156,7 +161,7 @@ float *flatten(float **maps, int number_of_maps, int h, int w){
     return array;
 }
 
-float **layer(float *input, int in_c, int in_h, int in_w, int kernel_size, int step, int num_of_filters, ConvLayer *weights){
+ConvResult layer(float *input, int in_c, int in_h, int in_w, int kernel_size, int step, int num_of_filters, ConvLayer *weights){
     float *col;
     int out_w = (in_w - kernel_size) / step + 1;
     int out_h = (in_h - kernel_size) / step + 1;
@@ -164,27 +169,33 @@ float **layer(float *input, int in_c, int in_h, int in_w, int kernel_size, int s
     int block_size = in_c * kernel_size * kernel_size;
 
     col = malloc(final_pix * block_size * sizeof(float));
-    im2col(input, in_c, in_h, in_w, kernel_size, step, col);
+    im2col(input, in_c, in_h, in_w, step, kernel_size, col);
 
     float **maps = malloc(num_of_filters * sizeof(float *));
     for (int i = 0; i < num_of_filters; i++){
         float *feature_map = malloc(final_pix * sizeof(float));
-        mat_mult(weights->weights[i], col, 1, block_size, final_pix, feature_map);
 
-        for (int j = 0; j < final_pix; j++){
-            feature_map[j] += weights->bias[i];
+        // mat_mult(weights->weights[i], col, 1, block_size, final_pix, feature_map);
+        for(int p = 0; p < final_pix; p++){
+            float sum = weights->bias[i];
+            for(int k = 0; k < block_size; k++){
+                sum +=col[p * block_size + k] * weights->weights[i][k];
+            }
+            feature_map[p] = sum;
         }
+
         relu(feature_map, final_pix);
-        for (int j = 0; j < final_pix; j++) {
-            if (feature_map[j] > 10) feature_map[j] = 10;
-        }
-        float *pooled_feature_map = maxpooling(feature_map, out_h, out_w, 2); 
-        maps[i] = pooled_feature_map;
-        free(feature_map);
+
+        maps[i] = feature_map;
+
     }
 
-    free(col);
-    return maps;
+    ConvResult result;
+
+    result.maps = maps;
+    result.col = col;
+
+    return result;
 }
 
 float *full_layer(FullLayer *weights, float *maps, int in_size, int classes){
@@ -250,10 +261,12 @@ void sgd_update(float *weights, float *grad_weights, float lr, int size, int bat
         weights[i] -= lr * (grad_weights[i] / batch_size);
     }
 }
+
 void sgd_momentum_update(float *weights, float *grads, float *velocity, float lr, float momentum, int size, int batch_size){
+    float lambda = 0.0001f;
     for(int i = 0; i < size; i++){
 
-        float grad = grads[i] / batch_size;
+        float grad = grads[i] / batch_size + lambda * weights[i];
 
         velocity[i] =
             momentum * velocity[i] - lr * grad;
@@ -261,6 +274,7 @@ void sgd_momentum_update(float *weights, float *grads, float *velocity, float lr
         weights[i] += velocity[i];
     }
 }
+
 void softmax_cross_entropy_gradient(float *probs, int true_class, float *grad_out){
     for (int i = 0; i < 10; i++) {
         grad_out[i] = probs[i];
@@ -279,3 +293,29 @@ int argmax(float *array, int size){
     return max_idx;
 }
 
+float *maps_to_array(float **maps, int channels, int h, int w){
+    int size = channels * h * w;
+
+    float *out = malloc(size * sizeof(float));
+
+    for(int c = 0; c < channels; c++){
+        for(int i = 0; i < h * w; i++){
+            out[c * h * w + i] = maps[c][i];
+        }
+    }
+
+    return out;
+}
+void conv_backward_weights(float *col, float *grad_output, float *grad_weights, float *grad_bias, int out_pixels, int block_size){
+    for(int p = 0; p < out_pixels; p++){
+
+        float grad = grad_output[p];
+
+        grad_bias[0] += grad;
+
+        for(int k = 0; k < block_size; k++){
+
+            grad_weights[k] += col[p * block_size + k] * grad;
+        }
+    }
+}

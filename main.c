@@ -5,130 +5,105 @@
 #include <math.h>
 #include <time.h>
 
-void evaluate(Dataset *test, FullLayer *fc1, FullLayer *fc2){
+typedef struct {
+    char dataset_path[256];
+    int epochs;
+    float learning_rate;
+    int batch_size;
+    int use_momentum;
+    float momentum;
+    int max_images;
+} Config;
+
+void load_config(const char *filename, Config *cfg){
+
+    FILE *file = fopen(filename, "r");
+
+    if(!file){
+        printf("Cannot open config file\n");
+        exit(1);
+    }
+
+    char line[256];
+
+    while(fgets(line, sizeof(line), file)){
+
+        sscanf(line, "DATASET_PATH=%s", cfg->dataset_path);
+        sscanf(line, "EPOCHS=%d", &cfg->epochs);
+        sscanf(line, "LEARNING_RATE=%f", &cfg->learning_rate);
+        sscanf(line, "BATCH_SIZE=%d", &cfg->batch_size);
+        sscanf(line, "USE_MOMENTUM=%d", &cfg->use_momentum);
+        sscanf(line, "MOMENTUM=%f", &cfg->momentum);
+        sscanf(line, "MAX_IMAGES=%d", &cfg->max_images);
+    }
+
+    fclose(file);
+}
+
+void evaluate(Dataset *test, ConvLayer *conv1, FullLayer *fc){
 
     int correct = 0;
 
-    for (int s = 0; s < test->num_of_images; s++){
+    for(int s = 0; s < test->num_of_images; s++){
 
         float *image = &test->images[s * 784];
-
         int label = test->classes[s];
 
-        float *h1 = full_layer(fc1, image, 784, 128);
+        ConvResult c1 = layer(image, 1, 28, 28, 5, 1, 8, conv1);
 
-        relu(h1, 128);
+        float *flat = flatten(c1.maps, 8, 24, 24);
 
-        float *logits = full_layer(fc2, h1, 128, 10);
+        float *logits = full_layer(fc, flat, 4608, 10);
 
         float probs[10];
 
         softmax(logits, probs, 10);
 
-        if (argmax(probs, 10) == label){
+        if(argmax(probs, 10) == label){
             correct++;
         }
 
-        free(h1);
+        free(flat);
         free(logits);
-    }
 
-    printf("TEST ACCURACY: %.2f%%\n",100.0f * correct / test->num_of_images);
-}
-
-void train_epoch_with_momentum(Dataset *train_data, FullLayer *fc1, FullLayer *fc2, float *v_w1, float *v_b1, float *v_w2, float *v_b2, float lr, int batch_size){
-     int correct = 0;
-    float total_loss = 0;
-    
-    for (int s = 0; s < (train_data->num_of_images)/batch_size ; s++) {
-        float *grad_weights1 = calloc(784 * 128, sizeof(float));
-        float *grad_bias1 = calloc(128, sizeof(float));
-
-        float *grad_weights2 = calloc(128 * 10, sizeof(float));
-        float *grad_bias2 = calloc(10, sizeof(float));
-
-        float *grad_h1 = malloc(128 * sizeof(float));
-        float *grad_input = malloc(784 * sizeof(float));
-        for (int i = 0; i < batch_size; i++){
-            float *image = &train_data->images[(s * batch_size + i) * 784];
-            int label = train_data->classes[(s * batch_size + i)];
-
-            // FULLY CONNECTED
-            float *h1 = full_layer(fc1, image, 784, 128);
-
-            relu(h1, 128);
-            float *logits = full_layer(fc2, h1, 128, 10);
-
-            float *probs = malloc(10 * sizeof(float));
-
-            softmax(logits, probs, 10);
-
-            // LOSS
-            
-            float loss = cross_entropy(probs, label, 10);
-            total_loss += loss;
-
-            if (argmax(probs, 10) == label) correct++;
-
-            // BACKWARD
-            float grad_out[10];
-            softmax_cross_entropy_gradient(probs, label, grad_out);
-
-            
-            fc_backwards(h1 , fc2->weights, grad_h1, grad_out, grad_weights2, grad_bias2, 128, 10);
-
-            relu_back(grad_h1, h1, 128);
-
-            fc_backwards(image, fc1->weights, grad_input, grad_h1, grad_weights1, grad_bias1, 784, 128);
-            free(probs);
-            free(h1);
-            free(logits);
-
+        for(int k = 0; k < 8; k++){
+            free(c1.maps[k]);
         }
 
-        // SGD
-        sgd_momentum_update(fc1->weights, grad_weights1, v_w1, lr, 0.9f, 784 * 128, batch_size);
-        sgd_momentum_update(fc1->bias, grad_bias1, v_b1, lr, 0.9f, 128, batch_size);
-
-        sgd_momentum_update(fc2->weights, grad_weights2, v_w2, lr, 0.9f, 128 * 10, batch_size);
-        sgd_momentum_update(fc2->bias, grad_bias2, v_b2, lr, 0.9f, 10, batch_size);
-
-        //FREE ALL
-        free(grad_weights1); 
-        free(grad_bias1); 
-        free(grad_weights2); 
-        free(grad_bias2); 
-        free(grad_h1);
-        free(grad_input);
-
-
+        free(c1.maps);
+        free(c1.col);
     }
-    printf("Loss: %.4f Acc: %.2f%%\n",total_loss / train_data->num_of_images,100.0f * correct / train_data->num_of_images);
-   
+
+    printf("TEST ACCURACY: %.2f%%\n", 100.0f * correct / test->num_of_images);
 }
-void train_epoch(Dataset *train_data, FullLayer *fc1, FullLayer *fc2, float lr, int batch_size) {
+void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer *fc, float *v_conv1_w, float *v_conv1_b, float *v_fc_w, float *v_fc_b, float lr, int batch_size, float momentum){
 
     int correct = 0;
     float total_loss = 0;
     
     for (int s = 0; s < (train_data->num_of_images)/batch_size ; s++) {
-        float *grad_weights1 = calloc(784 * 128, sizeof(float));
-        float *grad_bias1 = calloc(128, sizeof(float));
 
-        float *grad_weights2 = calloc(128 * 10, sizeof(float));
+        float *grad_weights2 = calloc(4608 * 10, sizeof(float));
         float *grad_bias2 = calloc(10, sizeof(float));
 
-        float *grad_h1 = malloc(128 * sizeof(float));
-        float *grad_input = malloc(784 * sizeof(float));
+        float *grad_conv1_weights = calloc(8 * 5 * 5, sizeof(float));
+        float *grad_conv1_bias = calloc(8, sizeof(float));
+
+        float *grad_flat2 = malloc(4608  * sizeof(float));
+
+
         for (int i = 0; i < batch_size; i++){
             float *image = &train_data->images[(s * batch_size + i) * 784];
             int label = train_data->classes[(s * batch_size + i)];
 
             // FULLY CONNECTED
-            float *h1 = full_layer(fc1, image, 784, 128);
+            ConvResult c1 = layer(image, 1, 28, 28, 5, 1, 8, conv1);
+            
+            float *flat = flatten(c1.maps, 8, 24, 24);
+            
 
-            relu(h1, 128);
-            float *logits = full_layer(fc2, h1, 128, 10);
+
+            float *logits = full_layer(fc, flat, 4608, 10);
 
             float *probs = malloc(10 * sizeof(float));
 
@@ -146,66 +121,189 @@ void train_epoch(Dataset *train_data, FullLayer *fc1, FullLayer *fc2, float lr, 
             softmax_cross_entropy_gradient(probs, label, grad_out);
 
             
-            fc_backwards(h1 , fc2->weights, grad_h1, grad_out, grad_weights2, grad_bias2, 128, 10);
+            fc_backwards(flat, fc->weights, grad_flat2, grad_out, grad_weights2, grad_bias2, 4608, 10);
 
-            relu_back(grad_h1, h1, 128);
-
-            fc_backwards(image, fc1->weights, grad_input, grad_h1, grad_weights1, grad_bias1, 784, 128);
+            for(int f = 0; f < 8; f++){
+                conv_backward_weights(c1.col, &grad_flat2[f * 576], grad_conv1_weights + f * 25, &grad_conv1_bias[f], 576, 25);
+            }
+            // relu_back(grad_flat2, flat2  , 256);
+            
             free(probs);
-            free(h1);
             free(logits);
+            free(flat);
 
+            for(int k = 0; k < 8; k++)
+                free(c1.maps[k]);
+
+            free(c1.maps);
+
+
+            free(c1.col);
         }
 
         // SGD
-        sgd_update(fc1->weights, grad_weights1, lr, 784 * 128, batch_size);
-        sgd_update(fc1->bias, grad_bias1, lr, 128, batch_size);
+        for(int f = 0; f < 8; f++){
+            sgd_momentum_update(conv1->weights[f], grad_conv1_weights + f * 25, v_conv1_w + f * 25, lr, momentum, 25, batch_size);
+        }
 
-        sgd_update(fc2->weights, grad_weights2, lr, 128 * 10, batch_size);
-        sgd_update(fc2->bias, grad_bias2, lr, 10, batch_size);
+        sgd_momentum_update(conv1->bias ,grad_conv1_bias, v_conv1_b, lr, momentum, 8, batch_size);
+
+        sgd_momentum_update(fc->weights,grad_weights2,v_fc_w,lr,momentum,4608 * 10,batch_size);
+        sgd_momentum_update(fc->bias,grad_bias2,v_fc_b,lr,momentum,10,batch_size);
 
         //FREE ALL
-        free(grad_weights1); 
-        free(grad_bias1); 
+
         free(grad_weights2); 
         free(grad_bias2); 
-        free(grad_h1);
-        free(grad_input);
+
 
 
     }
     printf("Loss: %.4f Acc: %.2f%%\n",total_loss / train_data->num_of_images,100.0f * correct / train_data->num_of_images);
+    
+    //LOGGING
+    FILE *log = fopen("heatmap.txt", "a");
+
+    fprintf(log, "%f %f\n", total_loss / train_data->num_of_images, 100.0f * correct / train_data->num_of_images);
+
+    fclose(log);
+}
+
+
+
+void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, int batch_size) {
+
+    int correct = 0;
+    float total_loss = 0;
+    
+    for (int s = 0; s < (train_data->num_of_images)/batch_size ; s++) {
+
+        float *grad_weights2 = calloc(4608 * 10, sizeof(float));
+        float *grad_bias2 = calloc(10, sizeof(float));
+
+        float *grad_conv1_weights = calloc(8 * 5 * 5, sizeof(float));
+        float *grad_conv1_bias = calloc(8, sizeof(float));
+
+        float *grad_flat2 = malloc(4608  * sizeof(float));
+
+
+        for (int i = 0; i < batch_size; i++){
+            float *image = &train_data->images[(s * batch_size + i) * 784];
+            int label = train_data->classes[(s * batch_size + i)];
+
+            // FULLY CONNECTED
+            ConvResult c1 = layer(image, 1, 28, 28, 5, 1, 8, conv1);
+            
+            float *flat = flatten(c1.maps, 8, 24, 24);
+            
+
+
+            float *logits = full_layer(fc, flat, 4608, 10);
+
+            float *probs = malloc(10 * sizeof(float));
+
+            softmax(logits, probs, 10);
+
+            // LOSS
+            
+            float loss = cross_entropy(probs, label, 10);
+            total_loss += loss;
+
+            if (argmax(probs, 10) == label) correct++;
+
+            // BACKWARD
+            float grad_out[10];
+            softmax_cross_entropy_gradient(probs, label, grad_out);
+
+            
+            fc_backwards(flat, fc->weights, grad_flat2, grad_out, grad_weights2, grad_bias2, 4608, 10);
+
+            for(int f = 0; f < 8; f++){
+                conv_backward_weights(c1.col, &grad_flat2[f * 576], grad_conv1_weights + f * 25, &grad_conv1_bias[f], 576, 25);
+            }
+            // relu_back(grad_flat2, flat2  , 256);
+            
+            free(probs);
+            free(logits);
+            free(flat);
+
+            for(int k = 0; k < 8; k++)
+                free(c1.maps[k]);
+
+            free(c1.maps);
+
+
+            free(c1.col);
+        }
+
+        // SGD
+        for(int f = 0; f < 8; f++){
+            sgd_update(conv1->weights[f], grad_conv1_weights + f * 25, lr, 25, batch_size);
+        }
+
+        sgd_update(conv1->bias, grad_conv1_bias, lr, 8, batch_size);
+
+        sgd_update(fc->weights, grad_weights2, lr, 4608 * 10, batch_size);
+        sgd_update(fc->bias, grad_bias2, lr, 10, batch_size);
+
+        //FREE ALL
+
+        free(grad_weights2); 
+        free(grad_bias2); 
+
+
+
+    }
+    printf("Loss: %.4f Acc: %.2f%%\n",total_loss / train_data->num_of_images,100.0f * correct / train_data->num_of_images);
+    
+    //LOGGING
+    FILE *log = fopen("heatmap.txt", "a");
+
+    fprintf(log, "%f %f\n", total_loss / train_data->num_of_images, 100.0f * correct / train_data->num_of_images);
+
+    fclose(log);
    
 }
 
 int main() {
-    // MAIN DATASET PATH
-    const char *main_path = "src/images/notMNIST_small";
     srand(time(NULL));
-    Dataset *ds = load_dataset(main_path, 1000);
+    // MAIN DATASET PATH
+    Config cfg;
+    load_config("config.txt", &cfg);
+
+    const char *main_path = cfg.dataset_path;
     
+    Dataset *ds = load_dataset(main_path, cfg.max_images);
+    printf("Max images = %d\n",cfg.max_images);
+
+
     Dataset *train = malloc(sizeof(Dataset));
     Dataset *test = malloc(sizeof(Dataset));
     train_test_split(ds, 0.8, train, test);
 
-    FullLayer *fc1 = init_weights_full(784, 128);
-    FullLayer *fc2 = init_weights_full(128, 10);
-    ConvLayer *conv1 = init_weights_conv(6, 1 * 5 * 5);
-    ConvLayer *conv2 = init_weights_conv(16, 6 * 5 * 5);
 
-    float *v_w1 = calloc(784 * 128, sizeof(float));
-    float *v_b1 = calloc(128, sizeof(float));
+    FullLayer *fc = init_weights_full(4608, 10);
+    ConvLayer *conv1 = init_weights_conv(8, 1 * 5 * 5);
 
-    float *v_w2 = calloc(128 * 10, sizeof(float));
-    float *v_b2 = calloc(10, sizeof(float));
-    
-    int epochs = 10;
-    float learning_rate = 0.001;
+
+    float *v_conv1_w = calloc(8 * 25, sizeof(float));
+    float *v_conv1_b = calloc(8, sizeof(float));
+
+    float *v_fc_w = calloc(4608 * 10, sizeof(float));
+    float *v_fc_b = calloc(10, sizeof(float));
+
+    int epochs = cfg.epochs;
+    float learning_rate = cfg.learning_rate;
 
     for (int epoch = 0; epoch < epochs; epoch++) {
         printf("Epoch %d:\n", epoch);
-        train_epoch(train, fc1, fc2, learning_rate, 32);
-        evaluate(test, fc1, fc2);
+        if (cfg.use_momentum){
+            train_epoch_with_momentum(train, conv1, fc, v_conv1_w, v_conv1_b, v_fc_w, v_fc_b, learning_rate, cfg.batch_size, cfg.momentum);
+        } else {
+            train_epoch(train, conv1, fc, learning_rate, cfg.batch_size);
+        }
+        
+        evaluate(test, conv1, fc);
     }
     
     free_dataset(train);

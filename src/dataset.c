@@ -12,7 +12,8 @@
 //LOAD IMAGE
 Image *load_one_image(const char *image_name) {
     int x, y, n;
-    unsigned char *data = stbi_load(image_name, &x, &y, &n, 0);
+    unsigned char *data = stbi_load(image_name, &x, &y, &n, 1);
+    n = 1;
     if (data == NULL) {
         printf("Cannot open image: %s\n", image_name);
         return NULL;
@@ -37,7 +38,7 @@ Image *load_one_image(const char *image_name) {
 
 void free_image(Image *img) {
     if (img) {
-        stbi_image_free(img->data);
+        free(img->data);
         free(img);
     }
 }
@@ -79,8 +80,8 @@ Dataset *load_dataset(const char* path, int max_images){
 
 
     for (int i = 0; i < number_of_classes; i++){
-        char path_for_class[512];
-        snprintf(path_for_class, sizeof(path_for_class), "%s/%s", path, classes[i]);
+        char *path_for_class = malloc(512);
+        snprintf(path_for_class, 512, "%s/%s", path, classes[i]);
 
         DIR *dir = opendir(path_for_class);
         Images *images = get_imgs_data(dir);
@@ -102,8 +103,8 @@ Dataset *load_dataset(const char* path, int max_images){
     int index = 0;
     // LOAD EVERY CLASS
     for (int class = 0; class < number_of_classes; class++){
-        char path_for_class[512];
-        snprintf(path_for_class, sizeof(path_for_class), "%s/%s", path, classes[class]);
+        char *path_for_class = malloc(512);
+        snprintf(path_for_class, 512, "%s/%s", path, classes[class]);
 
         DIR *dir = opendir(path_for_class);
         Images *images = get_imgs_data(dir);
@@ -121,10 +122,11 @@ Dataset *load_dataset(const char* path, int max_images){
                 continue;
             }
             for (int pixel = 0; pixel < W * H; pixel++){
-                ds->images[index + pixel] = img->data[pixel];
+                ds->images[index * W * H + pixel] = img->data[pixel];
             }
-            
-            ds->classes[index++] = class;
+
+            ds->classes[index] = class;
+            index++;
             free_image(img);
         }
         printf("Loaded %d images in %s class\n", to_load, classes[class]);

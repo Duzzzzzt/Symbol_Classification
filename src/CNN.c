@@ -29,8 +29,11 @@ FullLayer *init_weights_full(int in_size, int out_size){
     FullLayer *weights = malloc(sizeof(FullLayer));
 
     weights->weights = malloc(in_size * out_size * sizeof(float));
+    float scale = sqrtf(2.0f / in_size);
     for (int i = 0; i < in_size * out_size; i++) {
-        weights->weights[i] = ((float)rand() / RAND_MAX - 0.5f) * 0.0001f;
+        
+
+        weights->weights[i] =(((float)rand() / RAND_MAX) * 2.0f - 1.0f) * scale;
     }
 
     weights->bias = malloc(out_size * sizeof(float));
@@ -102,6 +105,18 @@ void relu(float *x, int size){
         }
     }
 }
+
+void relu_back(float *grads, float *activations, int size){
+
+    for (int i = 0; i < size; i++){
+
+        if (activations[i] <= 0.0f){
+            grads[i] = 0.0f;
+        }
+    }
+}
+
+
 
 float *maxpooling(float *map, int h, int w, int coef){
     int new_h = h / coef;
@@ -188,7 +203,8 @@ float *full_layer(FullLayer *weights, float *maps, int in_size, int classes){
 void softmax(float *input, float *output, int n){
     float max_val = input[0];
     for (int i = 1; i < n; i++) {
-        if (input[i] > max_val) max_val = input[i];
+        if (input[i] > max_val) 
+            max_val = input[i];
     }
     
     float sum = 0;
@@ -196,7 +212,7 @@ void softmax(float *input, float *output, int n){
         output[i] = expf(input[i] - max_val);
         sum += output[i];
     }
-    
+    if (sum < 1e-8f) sum = 1e-8f;
     for (int i = 0; i < n; i++) {
         output[i] /= sum;
     }
@@ -208,6 +224,43 @@ float cross_entropy(float *probs, int true_label, int num_classes){
     return -logf(p + eps);
 }
 
+
+void fc_backwards(float *input, float *weights, float *input_grad, float *output_grad, float *grad_weights, float *grad_bias, int in_size, int out_size){
+    //gradWij = xi * gradj
+        for (int i = 0; i < out_size; i++){
+            grad_bias[i] += output_grad[i];
+        }
+
+        for (int i = 0; i < in_size; i++){
+            for (int j = 0; j < out_size; j++){
+                grad_weights[i * out_size + j] += input[i] * output_grad[j];
+            }
+        }
+        for (int i = 0; i < in_size; i++) {
+            float sum = 0;
+            for (int j = 0; j < out_size; j++){
+                sum += weights[i * out_size + j] * output_grad[j];
+            }
+            input_grad[i] = sum;
+        }
+}
+
+void sgd_update(float *weights, float *grad_weights, float lr, int size, int batch_size){
+    for (int i = 0; i < size; i++){
+        weights[i] -= lr * (grad_weights[i] / batch_size);
+    }
+}
+void sgd_momentum_update(float *weights, float *grads, float *velocity, float lr, float momentum, int size, int batch_size){
+    for(int i = 0; i < size; i++){
+
+        float grad = grads[i] / batch_size;
+
+        velocity[i] =
+            momentum * velocity[i] - lr * grad;
+
+        weights[i] += velocity[i];
+    }
+}
 void softmax_cross_entropy_gradient(float *probs, int true_class, float *grad_out){
     for (int i = 0; i < 10; i++) {
         grad_out[i] = probs[i];
@@ -215,25 +268,6 @@ void softmax_cross_entropy_gradient(float *probs, int true_class, float *grad_ou
     grad_out[true_class] -= 1.0;
 }
 
-void fc_backward(float *grad_out, float *input, float *weights, float *grad_weights, float *grad_bias, float *grad_input, int in_size, int out_size){
-    for (int i = 0; i < out_size; i++){
-        grad_bias[i] = grad_out[i];
-    }
-
-    for (int i = 0; i < in_size; i++){
-        for (int j = 0; j < out_size; j++){
-            grad_weights[i * out_size + j] = input[i] * grad_out[j];
-        }
-    }
-
-    for (int i = 0; i < in_size; i++) {
-        float sum = 0;
-        for (int j = 0; j < out_size; j++){
-            sum += weights[i * out_size + j] * grad_out[j];
-        }
-        grad_input[i] = sum;
-    }
-}
 
 int argmax(float *array, int size){
     int max_idx = 0;
@@ -245,21 +279,3 @@ int argmax(float *array, int size){
     return max_idx;
 }
 
-void sgd_update(float *weights, float *gradients, int size, float lr, float clip) {
-    for (int i = 0; i < size; i++) {
-        float grad = gradients[i];
-        
-        if (isnan(grad) || isinf(grad)) {
-            continue;
-        }
-        
-        if (grad > clip) grad = clip;
-        if (grad < -clip) grad = -clip;
-        
-        weights[i] -= lr * grad;
-        
-        if (isnan(weights[i]) || isinf(weights[i])) {
-            weights[i] = 0;
-        }
-    }
-}

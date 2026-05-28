@@ -24,10 +24,12 @@ float *maxpooling(float *map, int h, int w, int coef);
 float *flatten(float **maps, int number_of_maps, int h, int w);
 float *full_layer(FullLayer *weights, float *maps, int in_size, int classes);
 float cross_entropy(float *probs, int true_label, int num_classes);
-void fc_backward(float *grad_out, float *input, float *weights, float *grad_weights, float *grad_bias, float *grad_input, int in_size, int out_size);
-
+void fc_backwards(float *input, float *weights, float *input_grad, float *output_grad, float *grad_weights, float *grad_bias, int in_size, int out_size);
+void grad(float *probs, int label, float *grad);
 int argmax(float *array, int size);
 void softmax_cross_entropy_gradient(float *probs, int true_class, float *grad_out);
-void sgd_update(float *weights, float *gradients, int size, float lr, float clip);
+void sgd_update(float *weights, float *grad_weights, float lr, int size, int batch_size);
+void relu_back(float *grads, float *activations, int size);
+void sgd_momentum_update(float *weights, float *grads, float *velocity, float lr, float momentum, int size, int batch_size);
 
 #endif

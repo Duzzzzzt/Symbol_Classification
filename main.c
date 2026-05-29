@@ -39,13 +39,53 @@ void load_config(const char *filename, Config *cfg){
 
     fclose(file);
 }
+void save_image(float *image, int h, int w, const char *filename){
+    FILE *f = fopen(filename, "w");
+
+    for(int y = 0; y < h; y++){
+        for(int x = 0; x < w; x++){
+            fprintf(f, "%f ", image[y * w + x]);
+        }
+        fprintf(f, "\n");
+    }
+
+    fclose(f);
+}
+
+void save_heatmaps(float **maps, int filters, int h, int w){
+
+    FILE *file = fopen("heatmap.txt", "a");
+
+    if(!file){
+        return;
+    }
+
+    for(int f = 0; f < filters; f++){
+
+        fprintf(file, "FILTER %d\n", f);
+
+        for(int y = 0; y < h; y++){
+
+            for(int x = 0; x < w; x++){
+
+                fprintf(file, "%.4f ", maps[f][y * w + x]);
+            }
+
+            fprintf(file, "\n");
+        }
+
+        fprintf(file, "\n");
+    }
+
+    fclose(file);
+}
 
 void evaluate(Dataset *test, ConvLayer *conv1, FullLayer *fc){
 
     int correct = 0;
 
     for(int s = 0; s < test->num_of_images; s++){
-
+        
         float *image = &test->images[s * 784];
         int label = test->classes[s];
 
@@ -76,7 +116,7 @@ void evaluate(Dataset *test, ConvLayer *conv1, FullLayer *fc){
 
     printf("TEST ACCURACY: %.2f%%\n", 100.0f * correct / test->num_of_images);
 }
-void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer *fc, float *v_conv1_w, float *v_conv1_b, float *v_fc_w, float *v_fc_b, float lr, int batch_size, float momentum){
+void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer *fc, float *v_conv1_w, float *v_conv1_b, float *v_fc_w, float *v_fc_b, float lr, int batch_size, float momentum, int epoch){
 
     int correct = 0;
     float total_loss = 0;
@@ -95,10 +135,17 @@ void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer 
         for (int i = 0; i < batch_size; i++){
             float *image = &train_data->images[(s * batch_size + i) * 784];
             int label = train_data->classes[(s * batch_size + i)];
+            
+            if(epoch == 29 && s == 0 && i == 0){
+                save_image(image, 28, 28, "plots/input.txt");
+            }
 
             // FULLY CONNECTED
             ConvResult c1 = layer(image, 1, 28, 28, 5, 1, 8, conv1);
-            
+            if(epoch == 29 && s == 0 && i == 0){
+                save_heatmaps(c1.maps, 8, 24, 24);
+            }
+
             float *flat = flatten(c1.maps, 8, 24, 24);
             
 
@@ -136,7 +183,7 @@ void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer 
                 free(c1.maps[k]);
 
             free(c1.maps);
-
+            
 
             free(c1.col);
         }
@@ -155,14 +202,16 @@ void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer 
 
         free(grad_weights2); 
         free(grad_bias2); 
-
+        free(grad_conv1_weights);
+        free(grad_conv1_bias);
+        free(grad_flat2);
 
 
     }
     printf("Loss: %.4f Acc: %.2f%%\n",total_loss / train_data->num_of_images,100.0f * correct / train_data->num_of_images);
     
     //LOGGING
-    FILE *log = fopen("heatmap.txt", "a");
+    FILE *log = fopen("metrics.txt", "a");
 
     fprintf(log, "%f %f\n", total_loss / train_data->num_of_images, 100.0f * correct / train_data->num_of_images);
 
@@ -171,7 +220,7 @@ void train_epoch_with_momentum(Dataset *train_data, ConvLayer *conv1, FullLayer 
 
 
 
-void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, int batch_size) {
+void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, int batch_size, int epoch){
 
     int correct = 0;
     float total_loss = 0;
@@ -190,10 +239,15 @@ void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, 
         for (int i = 0; i < batch_size; i++){
             float *image = &train_data->images[(s * batch_size + i) * 784];
             int label = train_data->classes[(s * batch_size + i)];
+            if(epoch == 29 && s == 0 && i == 0){
+                save_image(image, 28, 28, "plots/input.txt");
+            }
 
             // FULLY CONNECTED
             ConvResult c1 = layer(image, 1, 28, 28, 5, 1, 8, conv1);
-            
+            if(epoch == 29 && s == 0 && i == 0){
+                save_heatmaps(c1.maps, 8, 24, 24);
+            }
             float *flat = flatten(c1.maps, 8, 24, 24);
             
 
@@ -250,14 +304,15 @@ void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, 
 
         free(grad_weights2); 
         free(grad_bias2); 
-
-
+        free(grad_conv1_weights);
+        free(grad_conv1_bias);
+        free(grad_flat2);
 
     }
     printf("Loss: %.4f Acc: %.2f%%\n",total_loss / train_data->num_of_images,100.0f * correct / train_data->num_of_images);
     
     //LOGGING
-    FILE *log = fopen("heatmap.txt", "a");
+    FILE *log = fopen("metrics.txt", "a");
 
     fprintf(log, "%f %f\n", total_loss / train_data->num_of_images, 100.0f * correct / train_data->num_of_images);
 
@@ -266,10 +321,23 @@ void train_epoch(Dataset *train_data, ConvLayer *conv1,FullLayer *fc, float lr, 
 }
 
 int main() {
+    
+    FILE *heatmap = fopen("heatmap.txt", "w");
+    fclose(heatmap);
+    FILE *m = fopen("metrics.txt", "w");
+    fclose(m);
+
     srand(time(NULL));
     // MAIN DATASET PATH
     Config cfg;
     load_config("config.txt", &cfg);
+
+    printf("CONFIG:\n");
+    printf("Dataset: %s\n", cfg.dataset_path);
+    printf("Epochs: %d\n", cfg.epochs);
+    printf("Learning rate: %f\n", cfg.learning_rate);
+    printf("Batch size: %d\n", cfg.batch_size);
+    printf("Momentum: %d\n", cfg.use_momentum);
 
     const char *main_path = cfg.dataset_path;
     
@@ -295,12 +363,19 @@ int main() {
     int epochs = cfg.epochs;
     float learning_rate = cfg.learning_rate;
 
+    if (cfg.use_momentum){
+        printf("Using momentum\n");
+    } else {
+        printf("Standart\n");
+    }
+    
     for (int epoch = 0; epoch < epochs; epoch++) {
         printf("Epoch %d:\n", epoch);
         if (cfg.use_momentum){
-            train_epoch_with_momentum(train, conv1, fc, v_conv1_w, v_conv1_b, v_fc_w, v_fc_b, learning_rate, cfg.batch_size, cfg.momentum);
+            
+            train_epoch_with_momentum(train, conv1, fc, v_conv1_w, v_conv1_b, v_fc_w, v_fc_b, learning_rate, cfg.batch_size, cfg.momentum, epoch);
         } else {
-            train_epoch(train, conv1, fc, learning_rate, cfg.batch_size);
+            train_epoch(train, conv1, fc, learning_rate, cfg.batch_size, epoch);
         }
         
         evaluate(test, conv1, fc);
